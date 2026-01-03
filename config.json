@@ -1,0 +1,44 @@
+{
+  "environment": {
+    "grid_size": 10,
+    "start_pos": [0, 0],
+    "end_pos": [9, 9]
+  },
+  "architects": {
+    "population_size": 10,
+    "mutation_rate": 0.08,
+    "crossover_rate": 0.6,
+    "elite_size": 3,
+    "tournament_size": 3
+  },
+  "solvers": {
+    "population_size": 150,
+    "max_moves": 150,
+    "mutation_rate": 0.2,
+    "crossover_rate": 0.8,
+    "elite_size": 5,
+    "tournament_size": 3
+  },
+  "evolution": {
+    "max_generations": 100,
+    "architects_per_generation": 2,
+    "solvers_per_generation": 6,
+    "curriculum_learning": {
+      "enabled": true,
+      "initial_max_wall_density": 0.10,
+      "final_max_wall_density": 0.40,
+      "transition_generations": 80
+    }
+  },
+  "fitness": {
+    "architect_path_weight": 0.5,
+    "architect_failure_weight": 1.5,
+    "solver_goal_bonus": 150.0,
+    "solver_distance_weight": 15.0
+  },
+  "output": {
+    "save_plots": true,
+    "plots_dir": "output",
+    "plot_format": "png"
+  }
+}
