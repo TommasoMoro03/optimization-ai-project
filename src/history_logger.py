@@ -36,7 +36,6 @@ class HistoryLogger:
             'best_architect_fitness': best_architect.fitness,
             'best_solver_genome': best_solver.genome,
             'best_solver_fitness': best_solver.fitness,
-            # Additional statistics
             'avg_architect_fitness': sum(a.fitness for a in architects) / len(architects),
             'avg_solver_fitness': sum(s.fitness for s in solvers) / len(solvers),
             'num_architects': len(architects),
@@ -55,9 +54,12 @@ class HistoryLogger:
         """
         Log a crossover event for verification.
 
+        Note: Only used for architects (Genetic Algorithm).
+        Solvers use Evolutionary Strategy (ES) with mutation only, no crossover.
+
         Args:
             generation: Current generation
-            population_type: 'architect' or 'solver'
+            population_type: 'architect' (solvers don't use crossover)
             parent1_genome: First parent's genome
             parent2_genome: Second parent's genome
             child1_genome: First child's genome
@@ -81,6 +83,8 @@ class HistoryLogger:
                           genome_after: Any):
         """
         Log a mutation event for verification.
+
+        Note: Used for both architects (GA) and solvers (ES).
 
         Args:
             generation: Current generation
@@ -189,6 +193,9 @@ class HistoryLogger:
         """
         Print a summary of recent genetic operations.
 
+        Note: Architects use GA (crossover + mutation),
+        Solvers use ES (mutation only, no crossover).
+
         Args:
             num_operations: Number of recent operations to show
         """
@@ -198,6 +205,7 @@ class HistoryLogger:
 
         print(f"\n{'='*70}")
         print(f"GENETIC OPERATIONS SUMMARY (Last {num_operations} operations)")
+        print(f"Note: Architects=GA (crossover+mutation), Solvers=ES (mutation only)")
         print(f"{'='*70}")
 
         operations_to_show = self.genetic_operations_log[-num_operations:]

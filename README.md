@@ -1,10 +1,8 @@
 # Co-Evolutionary Maze Race
 
-A competitive co-evolutionary algorithm where **Architects** evolve increasingly complex mazes while **Solvers** evolve smarter navigation strategies. This creates an "arms race" dynamic where both populations continuously adapt to each other.
-
 ## Project Overview
 
-This project implements a **competitive co-evolution system** inspired by biological arms races (e.g., predator-prey evolution). Two populations compete:
+This project implements a **competitive co-evolution system** inspired by biological arms races. Two populations compete:
 
 - **Architects**: Evolve maze layouts to challenge solvers
 - **Solvers**: Evolve navigation policies to solve mazes efficiently
@@ -13,8 +11,10 @@ Unlike traditional optimization where there's a fixed target, here the target co
 
 ## Key Features
 
-### 1. Weight-Based Reactive Navigation
-Solvers use a **reactive policy** with 4 learned weights instead of pre-planned paths:
+### 1. Weight-Based Reactive Navigation for Solvers
+Initially, solvers used a genome of integer sequences representing pre-planned move directions (0=North, 1=East, etc.). This approach was problematic and conceptually incorrect because the same sequence couldn't generalize across different maze layouts.
+
+The current approach uses a **reactive policy** with 4 learned weights instead of pre-planned paths:
 
 ```
 Genome: [w_goal_dist, w_wall_penalty, w_visited_penalty, w_random_exploration]
@@ -22,13 +22,15 @@ Genome: [w_goal_dist, w_wall_penalty, w_visited_penalty, w_random_exploration]
 
 At each step, the solver evaluates neighboring cells using:
 ```
-Score(cell) = w_goal × (distance_improvement_to_goal)
-            + w_wall × (is_wall)
-            + w_visited × (visit_count)
-            + w_random × (random_noise)
+Score(cell) = w_goal_dist × (distance_improvement_to_goal)
+            + w_wall_penalty × (is_wall)
+            + w_visited_penalty × (visit_count)
+            + w_random_exploration × (random_noise)
 ```
 
 The cell with the highest score is chosen.
+So with the new approach instead of co-evolving a "map" and a "fixed path"
+we are co-evolving a "map" and a "navigator".
 
 **Why this approach?**
 - **Adaptive**: Weights define a policy that works across different mazes
@@ -37,44 +39,57 @@ The cell with the highest score is chosen.
 - **Reactive**: No planning required, decisions made on-the-fly
 
 **Weight Interpretation:**
-- `w_goal_dist` (typically positive ~0.8-2.0): Attracts agent toward goal
-- `w_wall_penalty` (typically negative ~-7.0): Strongly repels from walls
-- `w_visited_penalty` (typically negative ~-1.3): Discourages revisiting cells
-- `w_random_exploration` (typically small ~-0.5 to 0.5): Adds stochasticity
+- `w_goal_dist` (after evolution, typically positive ~0.8-2.0): Attracts agent toward goal
+- `w_wall_penalty` (after evolution, typically negative ~-7.0): Strongly repels from walls
+- `w_visited_penalty` (after evolution, typically negative ~-1.3): Discourages revisiting cells
+- `w_random_exploration` (after evolution, typically small ~-0.5 to 0.5): Adds stochasticity
 
-Evolution discovers that **wall avoidance** is critical (w_wall ≈ -7.0), more important than just moving toward the goal!
-
-### 2. Multi-Objective Fitness Functions
+### 2. Fitness Functions
 
 **Architect Fitness** (create challenging but solvable mazes):
 ```python
-fitness = difficulty_score × 2.0 + path_complexity + diversity_score × 0.5
+fitness = (difficulty_score × architect_maze_difficulty_weight) + path_complexity
 ```
 
 Components:
-- **Difficulty**: Rewards 30-70% solver failure rate (too easy or impossible is bad)
+- **Difficulty Score**: Rewards 30-70% solver failure rate (too easy or impossible is bad)
+  - Scaled by `architect_maze_difficulty_weight`
 - **Path Complexity**: Rewards mazes where optimal path > Manhattan distance (forces detours)
-- **Diversity**: Rewards 25-35% wall density (sweet spot for interesting mazes)
 - **Solvability**: Hard constraint - unsolvable mazes get fitness = 0
+
+**Note**: Wall density is controlled by curriculum learning, not by fitness. This hard constraint is more effective than a soft fitness reward.
+More details later.
 
 **Solver Fitness** (reach goal efficiently):
 ```python
 # If goal reached:
-fitness = (goal_bonus × efficiency_ratio) + 50 - (extra_steps × 2.0)
+fitness = solver_goal_bonus × efficiency_ratio
 
 # If goal not reached:
-fitness = 10 × (progress_ratio²)
+fitness = solver_progress_weight × (progress_ratio²)
 ```
 
 Components:
-- **Goal Bonus**: Large reward (100) for success, scaled by efficiency
-- **Efficiency Ratio**: `optimal_length / actual_length` (1.0 = perfect)
-- **Path Penalty**: Each extra step beyond optimal costs 2 fitness points
-- **Progress**: Quadratic reward for getting close if goal not reached
+- **Goal Bonus**: Large reward for reaching the goal, scaled by efficiency
+  - Scaled by `solver_goal_bonus` (default: 100.0)
+- **Efficiency Ratio**: `optimal_length / actual_length` (1.0 = perfect path, <1.0 = took longer)
+  - Perfect paths get full bonus, longer paths get proportionally less
+- **Progress Reward**: Quadratic reward for getting close if goal not reached
+  - Scaled by `solver_progress_weight` (default: 10.0)
+  - Quadratic scaling means getting very close is much better than partial progress
 
 ### 3. Curriculum Learning
 
-Gradually increases maze complexity over generations:
+This part can be configured by these parameters:
+```
+"curriculum_learning": {
+      "enabled": true,
+      "initial_max_wall_density": 0.15,
+      "final_max_wall_density": 0.45,
+      "transition_generations": 100
+    }
+```
+It gradually increases maze complexity over generations:
 
 ```python
 # Generations 0-100: Wall density increases from 15% → 45%
@@ -85,7 +100,6 @@ current_max_density = 0.15 + (generation / 100) × (0.45 - 0.15)
 - Prevents architects from creating impossible mazes early on
 - Gives solvers time to develop basic navigation skills
 - Creates smoother co-evolution dynamics
-- Mirrors natural evolution (simple → complex environments)
 
 ### 4. Competitive Co-Evolution Strategy
 
@@ -135,11 +149,13 @@ optimization-ai-project/
 ## Installation
 
 ```bash
+# Create a virtual environment and activate it
+
 # Install dependencies
-pip install numpy matplotlib
+pip install -r requirements.txt
 
 # Run the co-evolution
-python main.py
+python3 main.py
 ```
 
 ## Configuration
@@ -163,10 +179,7 @@ All parameters are in `config.json`:
   "solvers": {
     "population_size": 30,
     "max_moves": 200,
-    "mutation_rate": 0.3,
-    "crossover_rate": 0.8,
-    "elite_size": 3,
-    "tournament_size": 5,
+    "selection_size": 10,
     "weight_mutation_stddev": 0.3
   },
   "evolution": {
@@ -180,79 +193,76 @@ All parameters are in `config.json`:
   },
   "fitness": {
     "architect_maze_difficulty_weight": 2.0,
-    "architect_diversity_weight": 0.5,
     "solver_goal_bonus": 100.0,
-    "solver_path_efficiency_weight": 50.0,
+    "solver_path_efficiency_weight": 500.0,
     "solver_progress_weight": 10.0
   }
 }
 ```
 
-## Genetic Operators
+## Evolution Strategies
 
-### Architects (Binary Grid Genome)
-- **Crossover**: Single-point crossover at random row
-- **Mutation**: Bit-flip with 15% probability per cell
+This project uses **different optimization strategies** for the two populations, tailored to their genome types:
+
+### Architects: Genetic Algorithm (GA)
+**Genome type:** Discrete binary grid (10×10 = 100 bits)
+
+**Why GA?** Discrete search spaces benefit from crossover and stochastic selection.
+
+**Operators:**
+- **Selection**: Tournament selection (with configurable `tournament_size`) - stochastic, maintains diversity
+- **Crossover**: Single-point crossover at random row (with configurable `crossover_rate`)
+- **Mutation**: Bit-flip (with configurable probability per cell)
+- **Elitism**: Keep top individuals unchanged (configurable number)
 - **Constraints**: Ensures start/end are empty, maze is solvable, respects wall density limits
 
-### Solvers (Weight Vector Genome)
-- **Crossover**: Single-point crossover on weight vector
-- **Mutation**: Gaussian noise (σ=0.3) added to each weight with 30% probability
-- **Selection**: Tournament selection (size=5) for both populations
+### Solvers: Evolutionary Strategy (ES)
+**Genome type:** Continuous weight vector (4 floats)
+
+**Why ES?** Continuous optimization is more effective with gradient-like perturbations than crossover.
+
+**Operators:**
+- **Selection**: Truncated deterministic selection, keeps top parents (μ is configurable)
+- **Crossover**: None (not effective for continuous spaces)
+- **Mutation**: Gaussian noise added to the weights (the standard deviation is configurable)
+- **Strategy**: (μ + λ) ES where parents and offspring compete for the spots
+
+**How (μ + λ) works:**
+1. Evaluate all current solvers' fitness
+2. Select top μ as parents
+3. Generate λ offspring by mutating parents (round-robin)
+4. Evaluate offspring fitness immediately
+5. Combine parents + offspring
+6. Select best ones for next generation
+
+The choice of (μ + λ) strategy keeps the best from both parents and offspring, providing elitism while maintaining diversity.
 
 ## Results
 
-Typical evolution dynamics after 150 generations:
+Results of course are strongly influenced by the choice of values for the parameters. Being a lot of parameters,
+it is difficult to get a complete and perfect overview, but some considerations can be made especially when using 
+"reasonable" configurations:
 
-- **Wall Count**: 14 → 38 (mazes become more complex)
-- **Success Rate**: 63% → 73% (fluctuates as populations adapt)
-- **Path Complexity**: Optimal paths increase from ~18 to ~35 steps
+- **Wall Count**: it's constrained by the incremental growth (defined by curriculum learning),
+but usually it doesn't reach the maximum density allowed (e.g. max of 38 walls out of 100 cells, even with 45% max density).
+This probably depends on the particular conditions of the problem.
+- **Success Rate**: strongly depends mostly on the population sizes, with "reasonable" parameters fluctuates between 70% and 90%
+- **Path Complexity**: Optimal paths increase of course while the architects evolve, as there are more walls.
 - **Solver Weights**: Converge to strong wall avoidance (w_wall ≈ -7.0)
-- **Fitness Evolution**: Clear co-evolutionary dynamics (not flat lines)
+- **Fitness Evolution**: represents co-evolutionary dynamics (not flat lines)
 
 ### Visualization
 
+![Example of a dashboard](img/dashboard_example.png)
 The dashboard (`output/dashboard.png`) shows:
 1. **Fitness Over Time**: Arms race dynamics between populations
 2. **Success Rate**: Percentage of solver-architect pairs where solver succeeds
 3. **Path Length**: Average successful path length over generations
 4. **Wall Count**: Maze complexity evolution
-5. **Best Architect's Maze**: Most challenging evolved maze
-6. **Best Solver's Path**: Solution on the hardest maze
-7. **Optimal Solution**: A* reference path
-
-## Design Decisions
-
-### Why Fitness Variance Matters
-Initially, solver fitness was constant (all ~1000) because:
-- **Scale too large**: Variations were invisible
-- **Averaging**: Testing all 20 architects smoothed out differences
-
-**Solution**:
-- Reduced fitness scale by 10× (100 instead of 1000)
-- Sample 10 random architects instead of all 20
-- Creates meaningful fitness variance and better evolution
-
-### Why Path Penalty is Critical
-Original fitness gave almost same reward to 100-step and 20-step paths.
-
-**New approach**: Each extra step costs 2× fitness points, making efficiency truly matter:
-```
-20-step path: (100 × 1.0) + 50 - 0 = 150
-100-step path: (100 × 0.2) + 50 - 160 = -90
-Difference: 240 points! (was only 80)
-```
-
-### Why Best Solver Selection Was Fixed
-Original `get_best_solver()` found a solver that succeeded on *any* maze, but visualized it on the *hardest* maze. Mismatch caused path to appear unsuccessful.
-
-**Solution**: Find best solver specifically for the best architect's maze, ensuring visualization shows a successful path.
-
-### Why No Solvability Bonus?
-You might notice `architect_solvability_bonus` was removed from the config. This is because unsolvable mazes already get `fitness = 0` as a hard constraint. Adding a bonus for solvability would be redundant - all evaluated mazes are already solvable by definition!
-
-### Path Complexity Metric
-The variable is called `manhattan_distance` (not `max_possible_length`) because it represents the straight-line distance from start to goal. When we compute `optimal_length / manhattan_distance`, we're measuring how much the maze forces detours. A ratio > 1.0 means the optimal path is longer than the Manhattan distance, indicating a more interesting maze.
+5. **Best Architect's Maze**: Most challenging evolved maze (the one with highest architect fitness)
+6. **Best Solver's Path**: The solver that performs best on the hardest maze
+   - **Note**: Since the best architect's maze is the hardest one, the best solver may not always reach the goal. If no solver can solve it, the visualization shows the solver that got closest to the goal.
+7. **Optimal Solution**: A* reference path for the hardest maze (shows the theoretical optimal solution)
 
 ## Key Insights
 
@@ -271,12 +281,3 @@ Potential improvements:
 - **Dynamic obstacles**: Moving walls or time-varying mazes
 - **Multiple goals**: Mazes with waypoints or multiple exits
 - **Transfer learning**: Test if evolved weights generalize to new maze sizes
-
-## References
-
-This project demonstrates concepts from:
-- Competitive co-evolution and arms races
-- Genetic algorithms with tournament selection and elitism
-- Reactive agent architectures
-- Curriculum learning in evolutionary systems
-- Multi-objective fitness optimization
