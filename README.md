@@ -128,12 +128,13 @@ This gives evolution a better starting point than random weights.
 ```
 optimization-ai-project/
 │
-├── main.py                 # Main entry point and evolution loop
+├── main.py                 # Main entry point and co-evolution orchestration
 ├── config.json            # All hyperparameters
 │
 ├── src/
 │   ├── environment.py     # Grid environment setup
 │   ├── population.py      # Architect & Solver classes with fitness functions
+│   ├── evolution.py       # Evolution logic (GA for architects, ES for solvers)
 │   ├── metrics.py         # Performance tracking and best individual selection
 │   ├── visualization.py   # Dashboard and plot generation
 │   ├── history_logger.py  # Evolution history tracking
