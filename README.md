@@ -195,7 +195,6 @@ All parameters are in `config.json`:
   "fitness": {
     "architect_maze_difficulty_weight": 2.0,
     "solver_goal_bonus": 100.0,
-    "solver_path_efficiency_weight": 500.0,
     "solver_progress_weight": 10.0
   }
 }
