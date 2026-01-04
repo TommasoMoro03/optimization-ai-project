@@ -114,14 +114,19 @@ def evolve_solvers(solvers: List[Solver],
     Returns:
         New solver population
     """
-    # Evaluate fitness (test against ALL architects for consistent comparison)
+    # Evaluate fitness (test against a sample of architects for better variance)
+    # Using a sample instead of all architects creates more fitness diversity
+    num_test_architects = min(10, len(architects))  # Test against 10 random architects
+
     for solver in solvers:
-        # Test against ALL architects and average fitness
-        fitness_scores = []
-        for architect in architects:
+        # Test against a random sample of architects and SUM the fitness
+        # SUM (not mean) creates more variance between good and bad solvers
+        test_architects = random.sample(architects, num_test_architects)
+        fitness_sum = 0
+        for architect in test_architects:
             fitness = solver.calculate_fitness(architect, end_pos, config)
-            fitness_scores.append(fitness)
-        solver.fitness = np.mean(fitness_scores)
+            fitness_sum += fitness
+        solver.fitness = fitness_sum / num_test_architects  # Normalize by sample size
 
     # Sort by fitness
     solvers.sort(key=lambda x: x.fitness, reverse=True)
@@ -135,6 +140,7 @@ def evolve_solvers(solvers: List[Solver],
     tournament_size = config['solvers']['tournament_size']
     crossover_rate = config['solvers']['crossover_rate']
     mutation_rate = config['solvers']['mutation_rate']
+    mutation_stddev = config['solvers'].get('weight_mutation_stddev', 0.3)
 
     while len(new_population) < population_size:
         # Selection
@@ -169,15 +175,15 @@ def evolve_solvers(solvers: List[Solver],
         # Log first few mutations for verification
         if history_logger and len(new_population) < elite_size + 3:
             genome_before = child1.genome[:]
-            child1.mutate(mutation_rate)
+            child1.mutate(mutation_rate, mutation_stddev)
             history_logger.log_mutation_event(
                 generation, 'solver',
                 genome_before, child1.genome
             )
         else:
-            child1.mutate(mutation_rate)
+            child1.mutate(mutation_rate, mutation_stddev)
 
-        child2.mutate(mutation_rate)
+        child2.mutate(mutation_rate, mutation_stddev)
 
         # Add to new population
         new_population.append(child1)
@@ -239,9 +245,7 @@ def run_coevolution(config: dict):
 
     # Co-evolution loop
     max_generations = config['evolution']['max_generations']
-    architects_per_gen = config['evolution']['architects_per_generation']
-    solvers_per_gen = config['evolution']['solvers_per_generation']
-    
+
     # Get curriculum learning parameters (already loaded above)
     final_wall_density = curriculum_config.get('final_max_wall_density', 0.45) if use_curriculum else None
     transition_gens = curriculum_config.get('transition_generations', 50) if use_curriculum else 50
@@ -280,14 +284,12 @@ def run_coevolution(config: dict):
         if max_wall_density is not None:
             for arch in architects:
                 arch.enforce_max_wall_density(max_wall_density)
-        
+
         # Evolve architects using solvers from PREVIOUS generation (t-1)
-        for _ in range(architects_per_gen):
-            architects = evolve_architects(architects, prev_solvers, config, history, generation, max_wall_density)
+        architects = evolve_architects(architects, prev_solvers, config, history, generation, max_wall_density)
 
         # Evolve solvers using architects from PREVIOUS generation (t-1)
-        for _ in range(solvers_per_gen):
-            solvers = evolve_solvers(solvers, prev_architects, env.end_pos, config, history, generation)
+        solvers = evolve_solvers(solvers, prev_architects, env.end_pos, config, history, generation)
 
         # Record metrics and genome history (with UPDATED populations)
         metrics.record_generation(generation, architects, solvers, env.end_pos)

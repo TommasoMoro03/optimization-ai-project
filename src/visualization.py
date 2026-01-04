@@ -171,7 +171,8 @@ class Dashboard:
         ax.imshow(grid, cmap=cmap, interpolation='nearest')
 
         # Get solver's path
-        path, final_pos = simulate_solver_path(architect.genome, solver.genome, architect.start_pos)
+        path, final_pos = simulate_solver_path(architect.genome, solver.genome, architect.start_pos,
+                                               architect.end_pos, solver.max_moves)
 
         # Plot path
         if len(path) > 1:

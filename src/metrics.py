@@ -56,7 +56,9 @@ class MetricsTracker:
                 path, final_pos = simulate_solver_path(
                     architect.genome,
                     solver.genome,
-                    architect.start_pos
+                    architect.start_pos,
+                    end_pos,
+                    solver.max_moves
                 )
                 if final_pos == end_pos:
                     success_count += 1
@@ -86,22 +88,41 @@ class MetricsTracker:
 
     def get_best_solver(self, solvers: List[Solver], architects: List[Architect] = None,
                        end_pos: tuple = None) -> Solver:
-        """Get the best solver.
+        """Get the best solver that can solve the BEST architect's maze.
 
-        Prefers a solver that actually reaches the goal if possible.
-        Falls back to highest fitness if no successful solvers.
+        This ensures the visualization shows a successful path on the hardest maze.
+        If no solver can solve the best architect's maze, returns the one that gets closest.
         """
         if architects and end_pos:
-            # Try to find a solver that succeeds on at least one maze
-            for solver in sorted(solvers, key=lambda x: x.fitness, reverse=True):
-                for architect in architects:
-                    path, final_pos = simulate_solver_path(
-                        architect.genome, solver.genome, architect.start_pos
-                    )
-                    if final_pos == end_pos:
-                        return solver  # Found a successful solver!
+            # Get the best (hardest) architect's maze
+            best_architect = max(architects, key=lambda x: x.fitness)
 
-        # Fallback: highest fitness
+            # Find the solver that performs best on this specific maze
+            best_solver = None
+            best_distance = float('inf')
+
+            for solver in solvers:
+                path, final_pos = simulate_solver_path(
+                    best_architect.genome, solver.genome, best_architect.start_pos,
+                    end_pos, solver.max_moves
+                )
+
+                # Check if this solver reaches the goal on the best architect's maze
+                if final_pos == end_pos:
+                    # Solver succeeds! Return it immediately
+                    return solver
+
+                # Track which solver gets closest (for fallback)
+                distance = abs(final_pos[0] - end_pos[0]) + abs(final_pos[1] - end_pos[1])
+                if distance < best_distance:
+                    best_distance = distance
+                    best_solver = solver
+
+            # If no solver succeeds, return the one that got closest
+            if best_solver:
+                return best_solver
+
+        # Final fallback: highest fitness
         return max(solvers, key=lambda x: x.fitness)
 
     def print_generation_summary(self, generation: int):

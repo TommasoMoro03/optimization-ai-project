@@ -1,8 +1,3 @@
-"""
-History logger for genome tracking throughout evolution.
-Saves genome data for analysis and visualization.
-"""
-
 import json
 from typing import List, Dict, Any
 from src.population import Architect, Solver
@@ -10,7 +5,7 @@ from src.population import Architect, Solver
 
 class HistoryLogger:
     """
-    Logs detailed genome and fitness information for each generation.
+    Logs genome and fitness information for each generation.
     """
 
     def __init__(self):
@@ -179,12 +174,11 @@ class HistoryLogger:
 
         print(f"\nBest Solver:")
         print(f"  Fitness: {data['best_solver_fitness']:.2f}")
-        print(f"  Genome (first 20 moves):")
-        moves = data['best_solver_genome'][:20]
-        move_names = ['N', 'E', 'S', 'W']
-        move_str = ''.join([move_names[m] for m in moves])
-        print(f"    {move_str}...")
-        print(f"    (Total moves: {len(data['best_solver_genome'])})")
+        print(f"  Genome (weight-based policy):")
+        weights = data['best_solver_genome']
+        weight_names = ['w_goal_dist', 'w_wall_penalty', 'w_visited_penalty', 'w_random_exploration']
+        for name, value in zip(weight_names, weights):
+            print(f"    {name}: {value:.3f}")
 
         print(f"\nPopulation Stats:")
         print(f"  Avg Architect Fitness: {data['avg_architect_fitness']:.2f}")
@@ -214,16 +208,15 @@ class HistoryLogger:
             if op['operation'] == 'crossover':
                 print(f"  Parents → Children transformation:")
                 if op['population_type'] == 'solver':
-                    # Show first 15 moves for solvers
-                    p1 = op['parent1_genome'][:15]
-                    p2 = op['parent2_genome'][:15]
-                    c1 = op['child1_genome'][:15]
-                    c2 = op['child2_genome'][:15]
-                    move_names = ['N', 'E', 'S', 'W']
-                    print(f"    P1: {''.join([move_names[m] for m in p1])}...")
-                    print(f"    P2: {''.join([move_names[m] for m in p2])}...")
-                    print(f"    C1: {''.join([move_names[m] for m in c1])}...")
-                    print(f"    C2: {''.join([move_names[m] for m in c2])}...")
+                    # Show weights for solvers
+                    p1 = op['parent1_genome']
+                    p2 = op['parent2_genome']
+                    c1 = op['child1_genome']
+                    c2 = op['child2_genome']
+                    print(f"    P1 weights: [{', '.join([f'{w:.2f}' for w in p1])}]")
+                    print(f"    P2 weights: [{', '.join([f'{w:.2f}' for w in p2])}]")
+                    print(f"    C1 weights: [{', '.join([f'{w:.2f}' for w in c1])}]")
+                    print(f"    C2 weights: [{', '.join([f'{w:.2f}' for w in c2])}]")
                 else:
                     # Show first 2 rows for architects
                     print(f"    P1 (first 2 rows):")
@@ -234,16 +227,15 @@ class HistoryLogger:
             elif op['operation'] == 'mutation':
                 print(f"  Genome changes:")
                 if op['population_type'] == 'solver':
-                    before = op['genome_before'][:15]
-                    after = op['genome_after'][:15]
-                    move_names = ['N', 'E', 'S', 'W']
-                    before_str = ''.join([move_names[m] for m in before])
-                    after_str = ''.join([move_names[m] for m in after])
-                    # Highlight differences
-                    diff_str = ''.join(['*' if b != a else ' ' for b, a in zip(before, after)])
-                    print(f"    Before: {before_str}...")
-                    print(f"    After:  {after_str}...")
-                    print(f"    Diff:   {diff_str}")
+                    # Show weight changes for solvers
+                    before = op['genome_before']
+                    after = op['genome_after']
+                    print(f"    Before: [{', '.join([f'{w:.2f}' for w in before])}]")
+                    print(f"    After:  [{', '.join([f'{w:.2f}' for w in after])}]")
+                    # Show which weights changed
+                    changes = [i for i in range(len(before)) if abs(before[i] - after[i]) > 0.001]
+                    if changes:
+                        print(f"    Changed weights at indices: {changes}")
                 else:
                     # Count changed cells for architects
                     changes = 0

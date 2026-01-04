@@ -3,7 +3,6 @@ import numpy as np
 import random
 from src.utils import is_solvable, get_path_length, simulate_solver_path
 from src.environment import GridEnvironment
-from src.solver_strategies import create_greedy_solver_genome, create_mixed_strategy_genome
 
 
 class Architect:
@@ -30,7 +29,7 @@ class Architect:
     def _create_random_genome(self, wall_prob: float = 0.05, max_wall_density: float = None) -> List[List[int]]:
         """Create a random valid genome (solvable maze).
 
-        IMPORTANT: Start with very few walls (5%) so solvers have a chance!
+        We start with very few walls (5%) so solvers have chances
         Evolution will increase complexity over time.
         
         Args:
@@ -47,7 +46,7 @@ class Architect:
             genome[self.start_pos[0]][self.start_pos[1]] = 0
             genome[self.end_pos[0]][self.end_pos[1]] = 0
 
-            # Enforce max wall density if specified (curriculum learning)
+            # Enforce max wall density removing walls if specified in the config (curriculum learning)
             if max_wall_density is not None:
                 genome = self._enforce_max_wall_density(genome, max_wall_density)
 
@@ -76,7 +75,7 @@ class Architect:
     def _enforce_max_wall_density(self, genome: List[List[int]], max_density: float) -> List[List[int]]:
         """Enforce maximum wall density by randomly removing walls if needed.
         
-        This implements curriculum learning - keeps mazes simpler early in evolution.
+        This implements curriculum learning - keeps mazes simpler in the earlier steps of the evolution.
         """
         current_density = self._get_wall_density(genome)
         if current_density <= max_density:
@@ -114,7 +113,13 @@ class Architect:
 
     def calculate_fitness(self, solvers: List['Solver'], config: Dict[str, Any]) -> float:
         """
-        Calculate fitness based on how many solvers fail and path length.
+        Calculate fitness based on maze difficulty, diversity, and solvability.
+
+        A good architect maze should:
+        1. Be solvable (mandatory)
+        2. Challenge solvers (cause some to fail)
+        3. Have a longer optimal path (more interesting)
+        4. Have good wall diversity (not too simple)
 
         Args:
             solvers: List of Solver individuals to test against
@@ -128,21 +133,59 @@ class Architect:
             self.fitness = 0.0
             return self.fitness
 
-        # Get optimal path length
+        # Get optimal path length (longer path = more interesting maze)
         optimal_length = get_path_length(self.genome, self.start_pos, self.end_pos)
+        manhattan_distance = (self.grid_size - 1) * 2  # Straight-line distance from start to end
 
         # Count how many solvers fail to reach the goal
         failures = 0
+        total_solvers = len(solvers)
+        solver_path_lengths = []
+
         for solver in solvers:
-            path, final_pos = simulate_solver_path(self.genome, solver.genome, self.start_pos)
+            path, final_pos = simulate_solver_path(self.genome, solver.genome, self.start_pos,
+                                                   self.end_pos, solver.max_moves)
             if final_pos != self.end_pos:
                 failures += 1
+            else:
+                solver_path_lengths.append(len(path) - 1)
 
-        # Fitness: weighted combination of failures and path length
-        path_weight = config['fitness']['architect_path_weight']
-        failure_weight = config['fitness']['architect_failure_weight']
+        # Calculate failure rate (percentage of solvers that failed)
+        failure_rate = failures / total_solvers if total_solvers > 0 else 0
 
-        self.fitness = (failure_weight * failures) + (path_weight * optimal_length)
+        # Wall diversity: penalize if too few or too many walls
+        wall_count = self._count_walls(self.genome)
+        total_cells = self.grid_size * self.grid_size
+        wall_density = wall_count / total_cells
+        # Ideal density is around 0.25-0.35 (sweet spot for interesting mazes)
+        density_penalty = abs(wall_density - 0.30) * 20
+
+        # Extract weights from config
+        difficulty_weight = config['fitness']['architect_maze_difficulty_weight']
+        diversity_weight = config['fitness']['architect_diversity_weight']
+
+        # Fitness components:
+        # 1. Difficulty: reward for making solvers fail (but not all of them)
+        # Ideal is 30-70% failure rate (too easy or impossible is bad)
+        if failure_rate < 0.3:
+            difficulty_score = failure_rate * 100  # Reward partial difficulty
+        elif failure_rate <= 0.7:
+            difficulty_score = 30 + (failure_rate - 0.3) * 100
+        else:
+            difficulty_score = 30 - (failure_rate - 0.7) * 50  # Penalize too hard
+
+        # 2. Path complexity: reward mazes where optimal path is longer than Manhattan distance
+        # Ratio > 1.0 means the maze forces detours (more interesting)
+        path_complexity = (optimal_length / manhattan_distance) * 50
+
+        # 3. Diversity: penalize extremes in wall density
+        diversity_score = max(0, 20 - density_penalty)
+
+        # Note: No solvability bonus needed since unsolvable mazes already get fitness=0
+        self.fitness = (difficulty_weight * difficulty_score +
+                       path_complexity +
+                       diversity_weight * diversity_score)
+
         return self.fitness
 
     def mutate(self, mutation_rate: float, max_wall_density: float = None):
@@ -232,31 +275,40 @@ class Architect:
 
 class Solver:
     """
-    Solver individual that evolves move sequences.
-    Genome: List of integers representing moves (0=N, 1=E, 2=S, 3=W)
+    Solver individual that evolves reactive navigation policies.
+    Genome: List of 4 float weights [w_goal_dist, w_wall_penalty, w_visited_penalty, w_random_exploration]
+
+    At each step, the solver evaluates neighboring cells using these weights:
+    Score = w_goal * (goal_distance_improvement) + w_wall * (is_wall) + w_visited * (visit_count) + w_random * (random_noise)
     """
 
     def __init__(self, max_moves: int, start_pos: Tuple[int, int] = None,
                  end_pos: Tuple[int, int] = None, use_smart_init: bool = True):
         """
-        Initialize a Solver with a genome.
+        Initialize a Solver with a weight-based genome.
 
         Args:
-            max_moves: Maximum number of moves in the sequence
-            start_pos: Starting position (for smart initialization)
-            end_pos: Goal position (for smart initialization)
-            use_smart_init: If True, use greedy heuristic initialization
+            max_moves: Maximum number of moves allowed in simulation
+            start_pos: Starting position (kept for compatibility)
+            end_pos: Goal position (kept for compatibility)
+            use_smart_init: If True, use heuristic initialization for weights
         """
         self.max_moves = max_moves
         self.start_pos = start_pos
         self.end_pos = end_pos
 
-        # Smart initialization: bias toward goal direction
-        if use_smart_init and start_pos is not None and end_pos is not None:
-            self.genome = create_mixed_strategy_genome(max_moves, start_pos, end_pos)
+        # Weight-based genome: [w_goal_dist, w_wall_penalty, w_visited_penalty, w_random_exploration]
+        if use_smart_init:
+            # Smart initialization: reasonable starting weights
+            self.genome = [
+                random.uniform(0.5, 2.0),   # w_goal_dist: favor moving toward goal
+                random.uniform(-2.0, -0.5), # w_wall_penalty: avoid walls (negative)
+                random.uniform(-1.0, 0.0),  # w_visited_penalty: avoid revisiting (negative)
+                random.uniform(0.0, 0.5)    # w_random_exploration: some randomness
+            ]
         else:
-            # Fallback to random
-            self.genome = [random.randint(0, 3) for _ in range(max_moves)]
+            # Random initialization
+            self.genome = [random.uniform(-2.0, 2.0) for _ in range(4)]
 
         self.fitness = 0.0
 
@@ -264,7 +316,11 @@ class Solver:
                          config: Dict[str, Any]) -> float:
         """
         Calculate fitness based on reaching goal and path efficiency.
-        Improved to give better rewards for partial progress.
+
+        For weight-based reactive agents, we want to reward:
+        1. Successfully reaching the goal (most important)
+        2. Path efficiency (shorter paths are better)
+        3. Progress toward goal (if goal not reached)
 
         Args:
             architect: Architect whose maze to solve
@@ -275,76 +331,76 @@ class Solver:
             Fitness score (higher is better for the solver)
         """
         start_pos = architect.start_pos
-        path, final_pos = simulate_solver_path(architect.genome, self.genome, start_pos)
+        path, final_pos = simulate_solver_path(architect.genome, self.genome, start_pos,
+                                               end_pos, self.max_moves)
 
         goal_bonus = config['fitness']['solver_goal_bonus']
-        distance_weight = config['fitness']['solver_distance_weight']
+        efficiency_weight = config['fitness']['solver_path_efficiency_weight']
+        progress_weight = config['fitness']['solver_progress_weight']
 
         # Calculate distances
         distance_to_goal = abs(final_pos[0] - end_pos[0]) + abs(final_pos[1] - end_pos[1])
         max_distance = abs(start_pos[0] - end_pos[0]) + abs(start_pos[1] - end_pos[1])
-        progress = max_distance - distance_to_goal  # How much closer to goal
 
         # Check if reached goal
         if final_pos == end_pos:
-            # HUGE bonus for reaching goal, small penalty for path length
+            # SUCCESS! Give bonus based on path efficiency
             path_length = len(path) - 1
-            optimal_length = max_distance  # Manhattan distance
-            efficiency = 1.0 - min((path_length - optimal_length) / max(optimal_length, 1), 1.0)
 
-            self.fitness = goal_bonus + (efficiency * 50)  # 100-150 range for success
-        else:
-            # Improved fitness for partial progress
-            # Use stronger reward to favor getting closer
-            if max_distance > 0:
-                progress_ratio = progress / max_distance
-                # Stronger scaling: reward increases much faster as you get closer
-                # Changed from 1.5 to 2.0 for stronger gradient
-                self.fitness = distance_weight * (progress_ratio ** 2.0) * max_distance
+            # Get optimal path length for this maze
+            optimal_length = get_path_length(architect.genome, start_pos, end_pos)
+
+            # Calculate efficiency: reward paths closer to optimal
+            if optimal_length > 0 and path_length > 0:
+                # Efficiency ratio: 1.0 if perfect, decreases as path gets longer
+                efficiency_ratio = optimal_length / path_length
+                efficiency_ratio = min(efficiency_ratio, 1.0)  # Cap at 1.0
+
+                # Path penalty: penalize longer paths more strongly
+                # Extra steps beyond optimal are heavily penalized
+                extra_steps = max(0, path_length - optimal_length)
+                path_penalty = extra_steps * 2.0  # Each extra step costs 2 fitness points
             else:
-                self.fitness = 0
+                efficiency_ratio = 1.0
+                path_penalty = 0
 
-            # Bonus for path diversity (exploration) - increased
-            unique_positions = len(set(path))
-            self.fitness += unique_positions * 1.0
-            
-            # Extra bonus for using fewer moves (efficiency)
-            if len(path) > 0:
-                efficiency_bonus = max(0, (self.max_moves - len(path)) / self.max_moves * 10)
-                self.fitness += efficiency_bonus
+            # Final fitness: goal bonus scaled by efficiency, minus path penalty
+            # This makes shorter paths significantly better than longer ones
+            self.fitness = (goal_bonus * efficiency_ratio) + efficiency_weight - path_penalty
+        else:
+            # FAILURE: didn't reach goal
+            # Reward based on how close we got
+            if max_distance > 0:
+                progress = max_distance - distance_to_goal  # How much closer to goal
+                progress_ratio = progress / max_distance
+
+                # Quadratic scaling: getting very close is much better
+                self.fitness = progress_weight * (progress_ratio ** 2.0)
+            else:
+                # Start and end are same position (edge case)
+                self.fitness = 0
 
         return self.fitness
 
-    def mutate(self, mutation_rate: float):
+    def mutate(self, mutation_rate: float, mutation_stddev: float = 0.3):
         """
-        Mutate the genome by randomly changing moves.
-        Improved to add "retry" patterns that help when stuck.
+        Mutate the genome by perturbing weights with Gaussian noise.
 
         Args:
-            mutation_rate: Probability of changing each move
+            mutation_rate: Probability of mutating each weight
+            mutation_stddev: Standard deviation of Gaussian noise
         """
-        # Standard mutation: randomly change moves
         for i in range(len(self.genome)):
             if random.random() < mutation_rate:
-                self.genome[i] = random.randint(0, 3)
-        
-        # Additional improvement: add "retry" patterns (10% chance)
-        # This helps when solver hits a wall - tries same direction multiple times
-        if random.random() < 0.1 and len(self.genome) >= 3:
-            # Pick a random position and add a repeated pattern
-            pos = random.randint(0, len(self.genome) - 3)
-            direction = random.randint(0, 3)
-            # Repeat same direction 2-3 times (helps push through obstacles)
-            repeat_count = random.randint(2, 3)
-            for j in range(repeat_count):
-                if pos + j < len(self.genome):
-                    self.genome[pos + j] = direction
+                # Add Gaussian noise to weight
+                noise = np.random.normal(0, mutation_stddev)
+                self.genome[i] += noise
 
     @staticmethod
     def crossover(parent1: 'Solver', parent2: 'Solver') -> Tuple['Solver', 'Solver']:
         """
         Perform crossover between two parents to create two offspring.
-        Uses single-point crossover.
+        Uses single-point crossover on weight vectors.
 
         Args:
             parent1: First parent
@@ -358,8 +414,9 @@ class Solver:
         child2 = Solver(parent2.max_moves, parent2.start_pos, parent2.end_pos,
                        use_smart_init=False)
 
-        # Single-point crossover
-        crossover_point = random.randint(1, parent1.max_moves - 1)
+        # Single-point crossover on weight vector
+        num_weights = len(parent1.genome)
+        crossover_point = random.randint(1, num_weights - 1)
 
         child1.genome = parent1.genome[:crossover_point] + parent2.genome[crossover_point:]
         child2.genome = parent2.genome[:crossover_point] + parent1.genome[crossover_point:]

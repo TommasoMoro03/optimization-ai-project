@@ -5,36 +5,36 @@
     "end_pos": [9, 9]
   },
   "architects": {
-    "population_size": 10,
-    "mutation_rate": 0.08,
-    "crossover_rate": 0.6,
-    "elite_size": 3,
-    "tournament_size": 3
+    "population_size": 20,
+    "mutation_rate": 0.15,
+    "crossover_rate": 0.8,
+    "elite_size": 2,
+    "tournament_size": 5
   },
   "solvers": {
-    "population_size": 150,
-    "max_moves": 150,
-    "mutation_rate": 0.2,
+    "population_size": 30,
+    "max_moves": 200,
+    "mutation_rate": 0.3,
     "crossover_rate": 0.8,
-    "elite_size": 5,
-    "tournament_size": 3
+    "elite_size": 3,
+    "tournament_size": 5,
+    "weight_mutation_stddev": 0.3
   },
   "evolution": {
-    "max_generations": 100,
-    "architects_per_generation": 2,
-    "solvers_per_generation": 6,
+    "max_generations": 150,
     "curriculum_learning": {
       "enabled": true,
-      "initial_max_wall_density": 0.10,
-      "final_max_wall_density": 0.40,
-      "transition_generations": 80
+      "initial_max_wall_density": 0.15,
+      "final_max_wall_density": 0.45,
+      "transition_generations": 100
     }
   },
   "fitness": {
-    "architect_path_weight": 0.5,
-    "architect_failure_weight": 1.5,
-    "solver_goal_bonus": 150.0,
-    "solver_distance_weight": 15.0
+    "architect_maze_difficulty_weight": 2.0,
+    "architect_diversity_weight": 0.5,
+    "solver_goal_bonus": 100.0,
+    "solver_path_efficiency_weight": 50.0,
+    "solver_progress_weight": 10.0
   },
   "output": {
     "save_plots": true,

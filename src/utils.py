@@ -111,22 +111,40 @@ def get_path_length(grid: List[List[int]],
 
 
 def simulate_solver_path(grid: List[List[int]],
-                        moves: List[int],
-                        start: Tuple[int, int]) -> Tuple[List[Tuple[int, int]], bool]:
+                        weights: List[float],
+                        start: Tuple[int, int],
+                        end: Tuple[int, int] = None,
+                        max_moves: int = 150) -> Tuple[List[Tuple[int, int]], Tuple[int, int]]:
     """
-    Simulate a solver's path through the grid based on its move sequence.
+    Simulate a solver's path through the grid using weight-based reactive navigation.
+
+    The solver evaluates neighboring cells at each step using weights:
+    Score = w_goal * (goal_distance_improvement) + w_wall * (is_wall) + w_visited * (visit_count) + w_random * (random_noise)
 
     Args:
         grid: 2D grid where 0=empty, 1=wall
-        moves: List of move directions (0=N, 1=E, 2=S, 3=W)
+        weights: List of 4 floats [w_goal_dist, w_wall_penalty, w_visited_penalty, w_random_exploration]
         start: Starting position (row, col)
+        end: Goal position (row, col) - required for goal-based scoring
+        max_moves: Maximum number of moves to simulate
 
     Returns:
-        Tuple of (path taken as list of positions, whether goal was reached)
+        Tuple of (path taken as list of positions, final position)
     """
+    import random
+
+    if end is None:
+        # Fallback: if no goal specified, can't use reactive navigation properly
+        # Just return start position
+        return [start], start
+
     rows, cols = len(grid), len(grid[0])
     current = start
     path = [current]
+    visited_count = {current: 1}
+
+    # Extract weights
+    w_goal, w_wall, w_visited, w_random = weights
 
     # Direction mappings: 0=N, 1=E, 2=S, 3=W
     directions = [
@@ -136,24 +154,63 @@ def simulate_solver_path(grid: List[List[int]],
         (0, -1)   # West
     ]
 
-    for move in moves:
-        if move < 0 or move >= 4:
-            continue  # Invalid move
+    for _ in range(max_moves):
+        # Check if we reached the goal
+        if current == end:
+            break
 
-        delta_row, delta_col = directions[move]
-        next_row = current[0] + delta_row
-        next_col = current[1] + delta_col
+        # Calculate current distance to goal
+        current_dist = abs(current[0] - end[0]) + abs(current[1] - end[1])
 
-        # Check bounds
-        if not (0 <= next_row < rows and 0 <= next_col < cols):
-            continue  # Out of bounds, stay in place
+        # Evaluate all 4 neighbors
+        scores = []
+        for direction_idx, (delta_row, delta_col) in enumerate(directions):
+            next_row = current[0] + delta_row
+            next_col = current[1] + delta_col
+            next_pos = (next_row, next_col)
 
-        # Check if it's a wall
-        if grid[next_row][next_col] == 1:
-            continue  # Hit a wall, stay in place
+            # Check bounds
+            if not (0 <= next_row < rows and 0 <= next_col < cols):
+                scores.append((float('-inf'), direction_idx, next_pos))  # Invalid
+                continue
 
-        current = (next_row, next_col)
+            # Calculate score components
+            is_wall = grid[next_row][next_col]
+
+            # Goal distance improvement (negative = closer to goal)
+            next_dist = abs(next_row - end[0]) + abs(next_col - end[1])
+            goal_delta = current_dist - next_dist  # Positive if getting closer
+
+            # Visit count
+            visit_count = visited_count.get(next_pos, 0)
+
+            # Random exploration
+            random_noise = random.random()
+
+            # Calculate total score
+            score = (w_goal * goal_delta +
+                    w_wall * is_wall +
+                    w_visited * visit_count +
+                    w_random * random_noise)
+
+            scores.append((score, direction_idx, next_pos))
+
+        # Pick the highest scoring move
+        best_score, best_direction, best_pos = max(scores, key=lambda x: x[0])
+
+        # If best move is invalid (out of bounds), stop
+        if best_score == float('-inf'):
+            break
+
+        # If best move is a wall, stay in place (or could stop)
+        if grid[best_pos[0]][best_pos[1]] == 1:
+            # Don't move, but count this as a step
+            continue
+
+        # Make the move
+        current = best_pos
         path.append(current)
+        visited_count[current] = visited_count.get(current, 0) + 1
 
     return path, current
 
